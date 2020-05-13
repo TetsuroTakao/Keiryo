@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Ports;
 using System.Text;
 using System.Threading;
+using System.Linq;
 
 namespace IngicateWpf.COMPort
 {
@@ -36,6 +37,7 @@ namespace IngicateWpf.COMPort
         SerialPort serialPort { get; set; }
         public bool ReadComplete { get; set; }
         public string ComPortName { get; set; }
+        public string WeightReadstring { get; set; }
         public byte[] WeightReadBuffer { get; set; }
         public byte[] Buffer { get; set; }
         public COMSerialPort(string port) 
@@ -96,7 +98,7 @@ namespace IngicateWpf.COMPort
             }
             finally 
             {
-                serialPort.Close();
+                //serialPort.Close();
             }
         }
         private void SerialPort_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
@@ -126,70 +128,64 @@ namespace IngicateWpf.COMPort
         public int GetBytes(int check,byte[] buffer) 
         {
             var result = 0;
-            //var j = 0;
-            //#if !(DEBUG)
             result = -1;
             ReadComplete = false;
             try 
             {
                 if (serialPort == null) Open();
                 if (!serialPort.IsOpen) serialPort.Open();
-                //serialPort.DiscardInBuffer();
                 do
                 {
                     result = (serialPort.BytesToRead > 0) ? serialPort.Read(buffer, 0, buffer.Length) : 0;
-                    if (serialPort.BytesToRead > 0) break;
                     if (Result == ComCommunicateResultType.Cnacel)
                     {
                         result = -2;
+                        ReadComplete = true;
                         break;
                     }
-                    if (check == 0)
+                    if (check == ETX) 
                     {
-                        if (serialPort.BytesToRead > 0)
+                        if (buffer[0] != STX)
                         {
-                            result = 0;
-                            break;
+                            do
+                            {
+                                result = (serialPort.BytesToRead > 0) ? serialPort.Read(buffer, 0, buffer.Length) : 0;
+                            } while (buffer[0] != STX);
+                        }
+                        else 
+                        {
+                            var r = buffer.Where(b => b != 0);
+                            if (r.Count() > 0)
+                            {
+                                WeightReadstring = ASCIIEncoding.ASCII.GetString(r.ToArray());
+                                if (WeightReadstring.Length > 20)
+                                {
+                                    WeightReadstring = WeightReadstring.Substring(14, 6);
+                                    ReadComplete = true;
+                                    break;
+                                }
+                                else
+                                {
+                                    ReadComplete = false;
+                                }
+                            }
                         }
                     }
-                    else 
+                    else
                     {
                         if (buffer[0] == check)
                         {
-                            result = 0;
+                            result = check;
+                            ReadComplete = true;
                             break;
                         }
                     }
-                    //if (4 == check || 6 == check)
-                    //{
-                    //    result = 0;
-                    //    break;
-                    //}
-                } while (!(serialPort.BytesToRead > 0));
+                } while (!ReadComplete);
             }
             catch (Exception ex) 
             {
                 Messages.Add(ex.Message);
             }
-
-            //for (var i = 0; i <= 100; i++)
-            //{
-            //    result= (serialPort.BytesToRead > 0) ? serialPort.Read(buffer, 0, buffer.Length) : 0;
-            //    //serialPort.DiscardInBuffer();
-            //    if (Result == ComCommunicateResultType.Cnacel)
-            //    {
-            //        result = -2;
-            //        break;
-            //    }
-            //    if (buffer[0] == check)
-            //    {
-            //        result = 0;
-            //        break;
-            //    }
-            //    Thread.Sleep(50);
-            //    j++;
-            //}
-            //#endif
             return result;
         }
         public bool PutBytes(string writeData,byte[] byteArg) 

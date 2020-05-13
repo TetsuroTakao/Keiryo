@@ -28,7 +28,7 @@ namespace IngicateWpf
             vm = DataContext as MainWindowVM;
             LoadSettingsAndCom(vm);
             vm.ViewDispatcher = this.Dispatcher;
-            vm.MessageAreaText = string.Format("Port[{0}]  保存先 [{1}]", vm.ComPortInstance.ComPortName, vm.LogSaveDirctory);
+            vm.MessageAreaText = string.Format("Port[{0}]  保存実行ファイル [{1}]", vm.ComPortInstance.ComPortName, vm.LogPassDirctory);
             vm.CodeInputText = "";//本番
             vm.CodeInputIsEnabled = true;
             vm.EndButtonIsEnabled = true;
@@ -42,21 +42,6 @@ namespace IngicateWpf
 
             CodeInput.Focus();
         }
-        //void worker_DoWork(object sender, DoWorkEventArgs e)
-        //{
-        //    for (int i = 0; i < 100; i++)
-        //    {
-        //        (sender as BackgroundWorker).ReportProgress(i);
-        //        Thread.Sleep(50);
-        //    }
-        //}
-        //void worker_ProgressChanged(object sender, ProgressChangedEventArgs e)
-        //{
-        //    if (e.ProgressPercentage < 100) 
-        //    {
-        //        vm.MeasurementProgressValue = e.ProgressPercentage;
-        //    }
-        //}
         private void EndButton_Click(object sender, RoutedEventArgs e)
         {
             vm.ComPortInstance.Close();
@@ -77,52 +62,62 @@ namespace IngicateWpf
                 var task = new Task(new Action(() =>
                 {
                     vm.ComPortInstance.Buffer = new byte[100];
-                    for (int i = 1; i <= 10; i++)
                     {
-                        vm.GetKeiryoData(i);
-                        if (vm.ComPortInstance.Result == ComCommunicateResultType.TimeOut)
+                        for (int i = 1; i <= 10; i++)
                         {
-                            displayUpdate(12);
-                            break;
-                        }
-                        else if (vm.ComPortInstance.Result == ComCommunicateResultType.Cnacel)
-                        {
-                            displayUpdate(13);
-                            break;
-                        }
-                        else 
-                        {
-                            if (i == 10)
+                            if (ConfigurationManager.AppSettings["RS232C_MODE"] == "OneShot")
                             {
-                                weight = UnicodeEncoding.ASCII.GetString(vm.ComPortInstance.WeightReadBuffer);
-                                if (weight.Length > 4) weight = weight.Substring(0, 5);
-                                var d = 0d;
-                                if (double.TryParse(weight, out d))
+                                if(i == 3)
                                 {
-                                    //'リストビューの追加
-                                    var item = new WeightMeasurementLog();
-                                    item.Code = vm.CodeInputText;
-                                    item.Memo = string.Join(",", vm.ComPortInstance.Messages);
-                                    item.Memo += weight;
-                                    item.Weight = d;
-                                    item.WeightString = vm.SaveLog(vm.CodeInputText, weight).ToString() + " kg";
-                                    item.EventOccours = DateTime.Now;
-                                    item.EventMessage = item.EventOccours.ToString("yy/MM/dd HH:mm:ss");
-                                    var list = vm.MeasurementLog;
-                                    list.Add(item);
-                                    vm.MeasurementLog = list;
+                                    vm.GetKeiryoData(3);
+                                    vm.AlertText = string.Format("（WeightReadBufferLength:{0}））", vm.ComPortInstance.WeightReadstring);
+                                    vm.AlertVisibility = true;
+                                    i = 10;
+                                }
+                                else
+                                {
+                                    continue;
                                 }
                             }
-                            if (i == 3)
+                            else 
                             {
-                                var text = string.Empty;
-                                if (vm.ComPortInstance.WeightReadBuffer == null) vm.ComPortInstance.WeightReadBuffer = new byte[0];
-                                vm.AlertText = string.Format("（BufferLength:{0}）（WeightReadBufferLength:{1}）（BufferToString:{2}）（WeightReadBuffer:{3}）", (vm.ComPortInstance.Buffer == null ? 99 : vm.ComPortInstance.Buffer.Length), vm.ComPortInstance.WeightReadBuffer.Length, vm.ComPortInstance.Messages.LastOrDefault(), vm.debugText);
-                                vm.AlertVisibility = true;
+                                vm.GetKeiryoData(i);
                             }
-                            displayUpdate(i);
+                            if (vm.ComPortInstance.Result == ComCommunicateResultType.TimeOut)
+                            {
+                                displayUpdate(12);
+                                break;
+                            }
+                            else if (vm.ComPortInstance.Result == ComCommunicateResultType.Cnacel)
+                            {
+                                displayUpdate(13);
+                                break;
+                            }
+                            else
+                            {
+                                if (i == 10)
+                                {
+                                    var d = 0d;
+                                    if (double.TryParse(vm.ComPortInstance.WeightReadstring, out d))
+                                    {
+                                        //'リストビューの追加
+                                        var item = new WeightMeasurementLog();
+                                        item.Code = vm.CodeInputText;
+                                        item.Memo = string.Join(",", vm.ComPortInstance.Messages);
+                                        item.Memo += vm.ComPortInstance.WeightReadstring;
+                                        item.Weight = d;
+                                        item.WeightString = vm.SaveLog() + " kg";
+                                        item.EventOccours = DateTime.Now;
+                                        item.EventMessage = item.EventOccours.ToString("yy/MM/dd HH:mm:ss");
+                                        var list = vm.MeasurementLog;
+                                        list.Add(item);
+                                        vm.MeasurementLog = list;
+                                    }
+                                }
+                                displayUpdate(i);
+                            }
+                            Thread.Sleep(100);
                         }
-                        Thread.Sleep(100);
                     }
                     displayUpdate(15);
                 }));
@@ -261,6 +256,8 @@ namespace IngicateWpf
                         vm.InteraptButtonIsEnabled = false;
                         vm.CodeInputIsEnabled = true;
                         vm.EndButtonIsEnabled = true;
+                        vm.MeasurementProgressIsIndeterminate = false;
+                        vm.MeasurementProgressValue = 0;
                         vm.ComPortInstance.Result = ComCommunicateResultType.None;
                         CodeInput.Focus();
                         vm.CodeInputText = string.Empty;
@@ -268,6 +265,7 @@ namespace IngicateWpf
                     break;
             }
         }
+
 
         private void Button_Click(object sender, RoutedEventArgs e)
         {
@@ -284,12 +282,13 @@ namespace IngicateWpf
                 //App.configと差し替え
                 //var inifile = "YAMA_KEIRYO.ini";
                 //保存先フォルダとCOMポート、ファイル名の初期値
-                vm.LogSaveDirctory = Environment.CurrentDirectory + @"\Keiryo";
+                vm.LogPassDirctory = Environment.CurrentDirectory + @"\okuri";
                 var com = "COM1";
+                vm.LogExecution = "UpdateWeight.vbs";
                 //App.configで上書き
-                if (!string.IsNullOrEmpty(ConfigurationManager.AppSettings["SAVE_DIR2"])) vm.LogSaveDirctory = ConfigurationManager.AppSettings["SAVE_DIR2"];
+                if (!string.IsNullOrEmpty(ConfigurationManager.AppSettings["LogDir"])) vm.LogPassDirctory = ConfigurationManager.AppSettings["LogDir"];
+                if (!string.IsNullOrEmpty(ConfigurationManager.AppSettings["LogExe"])) vm.LogExecution = ConfigurationManager.AppSettings["LogExe"];
                 if (!string.IsNullOrEmpty(ConfigurationManager.AppSettings["COM_PORT"])) com = ConfigurationManager.AppSettings["COM_PORT"];
-                if (!string.IsNullOrEmpty(ConfigurationManager.AppSettings["SAVE_FILE"])) vm.LogSaveFileName = ConfigurationManager.AppSettings["SAVE_FILE"];
                 vm.ComPortInstance = new COMSerialPort(com);
                 //vm.ComPortInstance.Open();
                 if (vm.ComPortInstance.Messages.Count > 0) 
